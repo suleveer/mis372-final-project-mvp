@@ -19,132 +19,191 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const Account = sequelize.define('accounts', {
-  account_id: { 
-    type: DataTypes.INTEGER, 
-    primaryKey: true, 
-    autoIncrement: true 
+const Account = sequelize.define('Account', {
+  account_id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
   },
 
-  user_id: { 
-    type: DataTypes.TEXT, 
-    allowNull: false 
+  user_id: {
+    type: DataTypes.TEXT,
+    allowNull: false
   },
 
-  account_number: { 
-    type: DataTypes.STRING(30), 
+  account_number: {
+    type: DataTypes.STRING(30),
     allowNull: false,
     unique: true
   },
 
-  account_type: {
-    type: DataTypes.STRING(20),
+  name: {
+    type: DataTypes.STRING(100),
+    allowNull: false
+  },
+
+  created_at: {
+    type: DataTypes.DATE,
     allowNull: false,
-    validate: {
-      isIn: [['savings', 'checking', 'debit', 'credit']]
-    }
-  },
-
-  name: { 
-    type: DataTypes.STRING(100), 
-    allowNull: false 
-  },
-
-  created_at: { 
-    type: DataTypes.DATE, 
-    allowNull: false, 
-    defaultValue: Sequelize.NOW 
-  },
-
-  is_locked: { 
-    type: DataTypes.BOOLEAN, 
-    allowNull: false, 
-    defaultValue: false 
-  },
-
-  status: {
-    type: DataTypes.STRING(20),
-    allowNull: false,
-    defaultValue: 'active',
-    validate: {
-      isIn: [['active', 'closed']]
-    }
-  },
-
-  closed_at: { 
-    type: DataTypes.DATE, 
-    allowNull: true 
-  },
-
-  routing_number: { 
-    type: DataTypes.STRING(9),
-    allowNull: true 
+    defaultValue: Sequelize.NOW
   }
-
-}, { 
+}, {
   tableName: 'accounts',
   timestamps: false,
   underscored: true
 });
 
 
-const Transaction = sequelize.define('transactions', {
-  transaction_id: { 
-    type: DataTypes.INTEGER, 
-    primaryKey: true, 
-    autoIncrement: true 
+const Transaction = sequelize.define('Transaction', {
+  transaction_id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
   },
 
-  account_id: { 
-    type: DataTypes.INTEGER, 
+  account_id: {
+    type: DataTypes.INTEGER,
     allowNull: false
+    // FK handled via association below
   },
 
-  amount: { 
-    type: DataTypes.DECIMAL(12, 2), 
-    allowNull: false 
+  amount: {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: false,
+    validate: {
+      min: 0.01
+    }
   },
 
   transaction_type: {
-    type: DataTypes.STRING(20),
+    type: DataTypes.STRING(10),
     allowNull: false,
     validate: {
-      isIn: [['withdraw', 'transfer', 'deposit', 'charge', 'payoff']]
+      isIn: [['deposit', 'withdraw']]
     }
   },
 
-  transaction_date: { 
-    type: DataTypes.DATE, 
-    allowNull: false 
-  },
-
-  status: {
-    type: DataTypes.STRING(20),
+  created_at: {
+    type: DataTypes.DATE,
     allowNull: false,
-    validate: {
-      isIn: [['denied', 'succeeded']]
-    }
+    defaultValue: Sequelize.NOW
   },
 
-  created_at: { 
-    type: DataTypes.DATE, 
-    allowNull: false, 
-    defaultValue: Sequelize.NOW 
-  },
-
-  description: { 
+  description: {
     type: DataTypes.TEXT,
-    allowNull: true 
+    allowNull: true
   }
-
-}, { 
+}, {
   tableName: 'transactions',
   timestamps: false,
   underscored: true
 });
 
+Account.hasMany(Transaction, { foreignKey: 'account_id' });
+Transaction.belongsTo(Account, { foreignKey: 'account_id' });
+
+// function generateAccountNumber() {
+//   // Simple 10-digit random number as a string
+//   return Array.from({ length: 10 }, () => 
+//     Math.floor(Math.random() * 10)
+//   ).join('');
+// }
+
+async function generateUniqueAccountNumber() {
+  for (let i = 0; i < 5; i++) {     // try up to 5 times
+    const candidate = Array.from({ length: 10 }, () =>
+      Math.floor(Math.random() * 10)
+    ).join('');
+
+    const existing = await Account.findOne({
+      where: { account_number: candidate }
+    });
+
+    if (!existing) return candidate;
+  }
+
+  throw new Error("Failed to generate unique account number after 5 attempts");
+}
+
+app.post('/api/accounts', async (req, res) => {
+  try {
+    const { user_id, name } = req.body;
+
+    // Basic validation
+    if (!user_id || !name) {
+      return res.status(400).json({ error: 'user_id and name are required.' });
+    }
+
+    const account_number = await generateUniqueAccountNumber();
+
+    const account = await Account.create({
+      user_id,
+      name,
+      account_number
+    });
+
+    return res.status(201).json(account);
+
+  } catch (err) {
+    console.error('Error creating account:', err);
+
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      return res
+        .status(409)
+        .json({ error: 'Generated account number already exists. Try again.' });
+    }
+
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+
+app.get('/api/accounts/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+
+    // 1️⃣ Get the account itself
+    const account = await Account.findByPk(accountId);
+
+    if (!account) {
+      return res.status(404).json({ error: "Account not found." });
+    }
+
+    // 2️⃣ Fetch transactions and compute balance
+    const transactions = await Transaction.findAll({
+      where: { account_id: accountId }
+    });
+
+    const balance = transactions.reduce((total, tx) => {
+      if (tx.transaction_type === "deposit") return total + Number(tx.amount);
+      if (tx.transaction_type === "withdraw") return total - Number(tx.amount);
+      return total;
+    }, 0);
+
+    // 3️⃣ Build response object
+    const response = {
+      ...account.toJSON(),
+      balance, 
+      transactions
+    };
+
+    return res.json(response);
+
+  } catch (err) {
+    console.error("Error fetching account:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+
+app.use((req, res, next) => {
+    console.log(`${req.method} request made at ${req.url} -- Body: ${JSON.stringify(req.body)}`);
+    next();
+})
 
 
 
-
-
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
