@@ -157,6 +157,37 @@ app.post('/api/accounts', async (req, res) => {
   }
 });
 
+app.get('/api/accounts/dev', async (req, res) => {
+  try {
+    const accounts = await Account.findAll();
+    return res.json(accounts);
+  } catch (err) {
+    console.error("Error fetching accounts:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+app.get('/api/accounts', async (req, res) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: "user_id is required" });
+    }
+
+    const accounts = await Account.findAll({
+      where: { user_id }
+    });
+
+    res.json(accounts);
+
+  } catch (err) {
+    console.error("Error fetching accounts:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
 
 app.get('/api/accounts/:accountId', async (req, res) => {
   try {
@@ -171,8 +202,9 @@ app.get('/api/accounts/:accountId', async (req, res) => {
 
     // 2️⃣ Fetch transactions and compute balance
     const transactions = await Transaction.findAll({
-      where: { account_id: accountId }
-    });
+  where: { account_id: accountId },
+  order: [['created_at', 'DESC']]
+});
 
     const balance = transactions.reduce((total, tx) => {
       if (tx.transaction_type === "deposit") return total + Number(tx.amount);
@@ -194,6 +226,141 @@ app.get('/api/accounts/:accountId', async (req, res) => {
     return res.status(500).json({ error: "Internal server error." });
   }
 });
+
+app.post('/api/accounts/:accountId/deposit', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const { amount, description } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Amount must be greater than 0." });
+    }
+
+    // 1️⃣ Make sure account exists
+    const account = await Account.findByPk(accountId);
+    if (!account) {
+      return res.status(404).json({ error: "Account not found." });
+    }
+
+    // 2️⃣ Create a transaction
+    await Transaction.create({
+      account_id: accountId,
+      amount,
+      transaction_type: "deposit",
+      description
+    });
+
+    // 3️⃣ Get updated balance
+    const transactions = await Transaction.findAll({
+      where: { account_id: accountId }
+    });
+
+    const balance = transactions.reduce((total, tx) => {
+      if (tx.transaction_type === "deposit") return total + Number(tx.amount);
+      if (tx.transaction_type === "withdraw") return total - Number(tx.amount);
+      return total;
+    }, 0);
+
+    return res.status(201).json({
+      message: "Deposit successful.",
+      balance
+    });
+
+  } catch (err) {
+    console.error("Deposit error:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+
+app.post('/api/accounts/:accountId/withdraw', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const { amount, description } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Amount must be greater than 0." });
+    }
+
+    // 1️⃣ Confirm account exists
+    const account = await Account.findByPk(accountId);
+    if (!account) {
+      return res.status(404).json({ error: "Account not found." });
+    }
+
+    // 2️⃣ Compute current balance
+    const transactions = await Transaction.findAll({
+      where: { account_id: accountId }
+    });
+
+    const balance = transactions.reduce((total, tx) => {
+      if (tx.transaction_type === "deposit") return total + Number(tx.amount);
+      if (tx.transaction_type === "withdraw") return total - Number(tx.amount);
+      return total;
+    }, 0);
+
+    // 3️⃣ Prevent overdraft
+    if (amount > balance) {
+      return res.status(400).json({
+        error: "Insufficient funds.",
+        balance
+      });
+    }
+
+    // 4️⃣ Create withdrawal transaction
+    await Transaction.create({
+      account_id: accountId,
+      amount,
+      transaction_type: "withdraw",
+      description
+    });
+
+    // 5️⃣ Compute updated balance
+    const newBalance = balance - Number(amount);
+
+    return res.status(201).json({
+      message: "Withdrawal successful.",
+      balance: newBalance
+    });
+
+  } catch (err) {
+    console.error("Withdrawal error:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+// DELETE /api/accounts/:accountId
+// Deletes all transactions for that account, then deletes the account itself.
+app.delete('/api/accounts/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const id = Number(accountId);
+
+    if (!id || Number.isNaN(id)) {
+      return res.status(400).json({ error: "Invalid accountId parameter." });
+    }
+
+    // First delete all transactions tied to this account
+    await Transaction.destroy({
+      where: { account_id: id }
+    });
+
+    // Then delete the account
+    const deletedCount = await Account.destroy({
+      where: { account_id: id }
+    });
+
+    if (deletedCount === 0) {
+      return res.status(404).json({ error: "Account not found." });
+    }
+
+    return res.json({ message: "Account and related transactions deleted." });
+  } catch (err) {
+    console.error("Error deleting account:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+
 
 
 app.use((req, res, next) => {
