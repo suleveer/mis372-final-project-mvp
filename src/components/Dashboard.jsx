@@ -1,143 +1,192 @@
-import { useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { useEffect, useState } from "react";
 
 export default function Dashboard() {
   const [showBalance, setShowBalance] = useState(true);
+  const [account, setAccount] = useState(null);
+  const [transactions, setTransactions] = useState([]);
 
-  // Dummy data for now — backend later
-  const accounts = {
-    checking: 8234.50,
-    savings: 4123.80
-  };
+  // TEMPORARY for Phase 2 until Asgardeo is active:
+const accountId = 1; // use a real existing account ID
 
-  const recentTransactions = [
-    { id: 1, name: "Coffee Shop", amount: -4.50, date: "2025-11-14" },
-    { id: 2, name: "Salary Deposit", amount: 3500.00, date: "2025-11-13" },
-    { id: 3, name: "Grocery Store", amount: -87.32, date: "2025-11-12" },
-  ];
 
-  const totalBalance = accounts.checking + accounts.savings;
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const res = await fetch(`http://localhost:5000/api/accounts/${accountId}`);
+        const data = await res.json();
+
+        setAccount(data);
+        setTransactions(data.transactions || []);
+
+      } catch (err) {
+        console.error("Failed to load account:", err);
+      }
+    }
+
+    loadData();
+  }, []);
+
+  if (!account) {
+    return <p style={{ padding: "30px" }}>Loading account...</p>;
+  }
+
+  const totalBalance = account.balance;
 
   return (
     <div style={styles.container}>
       <h1 style={styles.title}>Welcome back!</h1>
       <p style={styles.subtitle}>Here’s what’s happening today.</p>
 
-      {/* Total balance card */}
+      {/* Total Balance */}
       <div style={styles.balanceCard}>
         <div style={styles.balanceHeader}>
           <h3>Total Balance</h3>
-          <div onClick={() => setShowBalance(!showBalance)} style={styles.eyeIcon}>
-            {showBalance ? <Eye size={20} /> : <EyeOff size={20} />}
-          </div>
+
+          <button 
+            onClick={() => setShowBalance(!showBalance)}
+            style={styles.showHideButton}
+          >
+            {showBalance ? "Hide" : "Show"}
+          </button>
         </div>
 
         <p style={styles.balanceAmount}>
-          {showBalance ? `$${totalBalance.toLocaleString()}` : "•••••"}
+          {showBalance ? `$${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "•••••"}
         </p>
       </div>
 
-      {/* Accounts section */}
+      {/* Account Card */}
       <div style={styles.accountGrid}>
-        {/* Checking */}
         <div style={styles.accountCard}>
-          <h3>Checking</h3>
-          <p style={styles.accountBalance}>${accounts.checking.toLocaleString()}</p>
-          <p style={styles.accountNumber}>•••• 4829</p>
-        </div>
-
-        {/* Savings */}
-        <div style={styles.accountCard}>
-          <h3>Savings</h3>
-          <p style={styles.accountBalance}>${accounts.savings.toLocaleString()}</p>
-          <p style={styles.accountNumber}>•••• 5941</p>
+          <h3>{account.name}</h3>
+          <p style={styles.accountBalance}>
+            ${account.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          </p>
+          <p style={styles.accountNumber}>•••• {account.account_number.slice(-4)}</p>
         </div>
       </div>
 
       {/* Recent Transactions */}
-      <h2 style={{ marginTop: "30px" }}>Recent Transactions</h2>
-      <div>
-        {recentTransactions.map(tx => (
-          <div key={tx.id} style={styles.transactionRow}>
-            <div>
-              <strong>{tx.name}</strong>
-              <p style={styles.txDate}>{tx.date}</p>
-            </div>
+      <h2 style={styles.recentTitle}>Recent Transactions</h2>
 
-            <p style={{ 
-              color: tx.amount < 0 ? "red" : "green",
-              fontWeight: "bold"
-            }}>
-              {tx.amount < 0 ? tx.amount.toFixed(2) : `+${tx.amount.toFixed(2)}`}
-            </p>
+      {transactions.map(tx => (
+        <div key={tx.transaction_id} style={styles.transactionRow}>
+          <div>
+            <strong>{tx.description || tx.transaction_type}</strong>
+            <p style={styles.txDate}>{tx.created_at.split("T")[0]}</p>
           </div>
-        ))}
-      </div>
+
+          <p style={{
+            color: tx.transaction_type === "withdraw" ? "red" : "green",
+            fontWeight: "bold"
+          }}>
+            {tx.transaction_type === "withdraw"
+              ? `-${Number(tx.amount).toFixed(2)}`
+              : `+${Number(tx.amount).toFixed(2)}`
+            }
+          </p>
+        </div>
+      ))}
     </div>
   );
 }
 
-// SIMPLE INLINE STYLES (clean and easy for MVP)
 const styles = {
   container: {
     padding: "30px",
     fontFamily: "sans-serif",
+    backgroundColor: "#f5f7fa",
+    minHeight: "100vh"
   },
+
   title: {
-    fontSize: "28px",
+    fontSize: "32px",
     fontWeight: "700",
+    color: "#1f2937"
   },
+
   subtitle: {
     marginTop: "-10px",
-    color: "#555",
+    color: "#4b5563",
+    fontSize: "16px"
   },
+
   balanceCard: {
     marginTop: "20px",
-    padding: "25px",
-    background: "linear-gradient(135deg, #2563eb, #3b82f6)",
-    color: "white",
+    padding: "30px",
+    background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+    color: "#f0f4ff",
     borderRadius: "16px",
   },
+
   balanceHeader: {
     display: "flex",
     justifyContent: "space-between",
+    alignItems: "center",
   },
-  eyeIcon: {
-    cursor: "pointer"
+
+  showHideButton: {
+    background: "rgba(255,255,255,0.25)",
+    border: "none",
+    color: "#ffffff",
+    padding: "6px 14px",
+    borderRadius: "8px",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: "500"
   },
+
   balanceAmount: {
-    fontSize: "28px",
+    fontSize: "36px",
     marginTop: "15px",
     fontWeight: "700",
+    color: "#ffffff"
   },
+
   accountGrid: {
     display: "flex",
     gap: "20px",
     marginTop: "25px",
   },
+
   accountCard: {
     flex: 1,
-    padding: "20px",
-    background: "#fff",
-    borderRadius: "12px",
-    border: "1px solid #eee",
+    padding: "22px",
+    background: "#ffffff",
+    borderRadius: "14px",
+    border: "1px solid #e5e7eb",
+    color: "#111827"
   },
+
   accountBalance: {
-    fontSize: "22px",
+    fontSize: "24px",
     fontWeight: "600",
+    color: "#111827"
   },
+
   accountNumber: {
     marginTop: "-5px",
-    color: "gray",
+    color: "#6b7280",
+    fontSize: "14px"
   },
+
+  recentTitle: {
+    marginTop: "30px",
+    fontSize: "22px",
+    fontWeight: "700",
+    color: "#1f2937"
+  },
+
   transactionRow: {
     display: "flex",
     justifyContent: "space-between",
-    padding: "15px 0",
-    borderBottom: "1px solid #eee",
+    padding: "16px 0",
+    borderBottom: "1px solid #e5e7eb",
+    color: "#111827"
   },
+
   txDate: {
-    color: "gray",
+    color: "#6b7280",
     fontSize: "14px",
     marginTop: "-3px",
   }
